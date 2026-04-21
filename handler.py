@@ -9,6 +9,14 @@ from urllib.request import urlopen
 import numpy as np
 import runpod
 import soundfile as sf
+import torch
+import torch._dynamo
+
+# If torch.compile / Inductor can't find a C compiler at runtime, fall back to
+# eager instead of 500-ing the request. The Dockerfile now installs gcc/g++
+# so compile should succeed, but this keeps the worker alive regardless.
+torch._dynamo.config.suppress_errors = True
+
 from voxcpm import VoxCPM
 
 MODEL_ID = os.environ.get("VOXCPM_MODEL_ID", "openbmb/VoxCPM2")

@@ -12,7 +12,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TRANSFORMERS_CACHE=/runpod-volume/huggingface \
     MODELSCOPE_CACHE=/runpod-volume/modelscope \
     VOXCPM_MODEL_ID=openbmb/VoxCPM2 \
-    VOXCPM_LOAD_DENOISER=false
+    VOXCPM_LOAD_DENOISER=false \
+    CC=gcc \
+    CXX=g++
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
@@ -20,6 +22,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         sox \
         git \
         ca-certificates \
+        gcc \
+        g++ \
+        make \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
