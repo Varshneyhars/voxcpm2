@@ -41,6 +41,7 @@ snapshot_download('openbmb/VoxCPM2', cache_dir='/opt/hf-cache')" && \
     fi
 ENV HUGGINGFACE_HUB_CACHE=/opt/hf-cache \
     HF_HOME=/opt/hf-cache \
-    TRANSFORMERS_CACHE=/opt/hf-cache
+    TRANSFORMERS_CACHE=/opt/hf-cache \
+    MODELSCOPE_CACHE=/opt/hf-cache/modelscope
 
 CMD ["python", "-u", "handler.py"]

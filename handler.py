@@ -14,10 +14,21 @@ from voxcpm import VoxCPM
 MODEL_ID = os.environ.get("VOXCPM_MODEL_ID", "openbmb/VoxCPM2")
 LOAD_DENOISER = os.environ.get("VOXCPM_LOAD_DENOISER", "false").lower() == "true"
 
-print(f"[init] Loading VoxCPM2 model: {MODEL_ID} (denoiser={LOAD_DENOISER})")
-MODEL = VoxCPM.from_pretrained(MODEL_ID, load_denoiser=LOAD_DENOISER)
-SAMPLE_RATE = MODEL.tts_model.sample_rate
-print(f"[init] Model ready. Sample rate: {SAMPLE_RATE}")
+# Lazy init: load model on first request, not at import. Lets the worker reach
+# runpod.serverless.start() instantly so it passes readiness, even when the
+# first model load takes 60-120s on a cold disk.
+_MODEL = None
+_SAMPLE_RATE = None
+
+
+def _get_model():
+    global _MODEL, _SAMPLE_RATE
+    if _MODEL is None:
+        print(f"[lazy-init] Loading VoxCPM2: {MODEL_ID} (denoiser={LOAD_DENOISER})")
+        _MODEL = VoxCPM.from_pretrained(MODEL_ID, load_denoiser=LOAD_DENOISER)
+        _SAMPLE_RATE = _MODEL.tts_model.sample_rate
+        print(f"[lazy-init] Model ready. Sample rate: {_SAMPLE_RATE}")
+    return _MODEL, _SAMPLE_RATE
 
 
 def _materialize_audio(value: Optional[str]) -> Optional[str]:
@@ -70,7 +81,8 @@ def handler(event):
         cfg_value (float, default 2.0): LM guidance on LocDiT.
         inference_timesteps (int, default 10): LocDiT diffusion steps.
         normalize (bool, default True): Enable external text normalization.
-        denoise (bool, default True): Enable external denoiser on reference.
+        denoise (bool, default False): Enable external denoiser on reference
+            (requires VOXCPM_LOAD_DENOISER=true; silently ignored otherwise).
         retry_badcase (bool, default True): Retry on unstable generations.
         retry_badcase_max_times (int, default 3)
         retry_badcase_ratio_threshold (float, default 6.0)
@@ -88,10 +100,15 @@ def handler(event):
     reference_wav_path = None
     prompt_wav_path = None
     try:
+        model, sample_rate = _get_model()
+
         reference_wav_path = _materialize_audio(inp.get("reference_wav"))
         prompt_wav_path = _materialize_audio(inp.get("prompt_wav"))
 
-        wav = MODEL.generate(
+        # denoise defaults to False because VOXCPM_LOAD_DENOISER is off by
+        # default. Requesting denoise=True without the denoiser loaded crashes
+        # at generate() time.
+        wav = model.generate(
             text=text,
             prompt_wav_path=prompt_wav_path,
             prompt_text=inp.get("prompt_text"),
@@ -99,7 +116,7 @@ def handler(event):
             cfg_value=float(inp.get("cfg_value", 2.0)),
             inference_timesteps=int(inp.get("inference_timesteps", 10)),
             normalize=bool(inp.get("normalize", True)),
-            denoise=bool(inp.get("denoise", True)),
+            denoise=bool(inp.get("denoise", False)) and LOAD_DENOISER,
             retry_badcase=bool(inp.get("retry_badcase", True)),
             retry_badcase_max_times=int(inp.get("retry_badcase_max_times", 3)),
             retry_badcase_ratio_threshold=float(
@@ -109,14 +126,14 @@ def handler(event):
 
         fmt = str(inp.get("output_format", "wav")).lower()
         sf_format = "FLAC" if fmt == "flac" else "WAV"
-        audio_b64 = _encode_wav(wav, SAMPLE_RATE, fmt=sf_format)
+        audio_b64 = _encode_wav(wav, sample_rate, fmt=sf_format)
 
         return {
             "audio_base64": audio_b64,
-            "sample_rate": SAMPLE_RATE,
+            "sample_rate": sample_rate,
             "format": fmt,
             "num_samples": int(wav.shape[-1]),
-            "duration_seconds": float(wav.shape[-1] / SAMPLE_RATE),
+            "duration_seconds": float(wav.shape[-1] / sample_rate),
         }
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
